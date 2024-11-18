@@ -20,7 +20,7 @@ def generate_ellipsoid_clusters(distance, n_samples=100, cluster_std=0.5):
     y1 = np.zeros(n_samples)
 
     # Generate the second cluster (class 1) and shift it
-    X2 = np.random.multivariate_normal(mean=[1 + distance, 1 + distance], cov=covariance_matrix, size=n_samples)
+    X2 = np.random.multivariate_normal(mean=[1 + distance, 1 - distance], cov=covariance_matrix, size=n_samples)
     y2 = np.ones(n_samples)
 
     # Combine the clusters into one dataset
@@ -35,23 +35,27 @@ def fit_logistic_regression(X, y):
     beta1, beta2 = model.coef_[0]
     return model, beta0, beta1, beta2
 
+
+
 def do_experiments(start, end, step_num):
     shift_distances = np.linspace(start, end, step_num)
     beta0_list, beta1_list, beta2_list, slope_list, intercept_list, loss_list, margin_widths = [], [], [], [], [], [], []
     sample_data = {}
 
-    n_samples = 8
+    n_samples = step_num
     n_cols = 2
     n_rows = (n_samples + n_cols - 1) // n_cols
     plt.figure(figsize=(20, n_rows * 10))
 
     for i, distance in enumerate(shift_distances, 1):
+        # Generate clusters and fit the logistic regression model
         X, y = generate_ellipsoid_clusters(distance=distance)
         model, beta0, beta1, beta2 = fit_logistic_regression(X, y)
 
-        # Calculate slope and intercept
+        # Calculate slope, intercept, and margin width
         slope = -beta1 / beta2
         intercept = -beta0 / beta2
+        margin_width = 2 / np.linalg.norm([beta1, beta2])
 
         # Logistic loss
         probabilities = model.predict_proba(X)
@@ -63,39 +67,62 @@ def do_experiments(start, end, step_num):
         slope_list.append(slope)
         intercept_list.append(intercept)
         loss_list.append(loss)
+        margin_widths.append(margin_width)
 
-        # Plot dataset and decision boundary
-        plt.subplot(n_rows, n_cols, i)
-        plt.scatter(X[y == 0][:, 0], X[y == 0][:, 1], c='blue', label="Class 0")
-        plt.scatter(X[y == 1][:, 0], X[y == 1][:, 1], c='red', label="Class 1")
-        
-        x_vals = np.linspace(X[:, 0].min(), X[:, 0].max(), 100)
-        y_vals = slope * x_vals + intercept
-        plt.plot(x_vals, y_vals, c='black', linestyle='--', label="Decision Boundary")
-
-        # Calculate and plot margin width
+        # Prepare for plotting
         x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
         y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
         xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200), np.linspace(y_min, y_max, 200))
         Z = model.predict_proba(np.c_[xx.ravel(), yy.ravel()])[:, 1]
         Z = Z.reshape(xx.shape)
 
-        contour_levels = [0.7, 0.8, 0.9]
+        # Plotting the data points
+        plt.subplot(n_rows, n_cols, i)
+        plt.scatter(X[y == 0][:, 0], X[y == 0][:, 1], c='blue', label="Class 0", s=10)
+        plt.scatter(X[y == 1][:, 0], X[y == 1][:, 1], c='red', label="Class 1", s=10)
+
+        # Plot decision boundary
+        x_vals = np.linspace(x_min, x_max, 100)
+        y_vals = slope * x_vals + intercept
+        plt.plot(x_vals, y_vals, c='black', linestyle='--', label="Decision Boundary")
+
+        # Plot margin lines
+        margin_offset = margin_width / 2 * np.array([-beta2, beta1]) / np.linalg.norm([beta1, beta2])
+        margin_intercept1 = intercept - margin_offset[1]
+        margin_intercept2 = intercept + margin_offset[1]
+        plt.plot(
+            x_vals, slope * x_vals + margin_intercept1, "k:", alpha=0.8, label="Margin Line"
+        )
+        plt.plot(
+            x_vals, slope * x_vals + margin_intercept2, "k:", alpha=0.8
+        )
+
+        # Plot probability contours (confidence regions)
+        contour_levels = [0.7, 0.8, 0.9]  # Example confidence levels
         alphas = [0.05, 0.1, 0.15]
         for level, alpha in zip(contour_levels, alphas):
-            class_1_contour = plt.contourf(xx, yy, Z, levels=[level, 1.0], colors=['red'], alpha=alpha)
-            class_0_contour = plt.contourf(xx, yy, Z, levels=[0.0, 1 - level], colors=['blue'], alpha=alpha)
+            plt.contourf(xx, yy, Z, levels=[level, 1.0], colors=["red"], alpha=alpha)
+            plt.contourf(xx, yy, Z, levels=[0.0, 1 - level], colors=["blue"], alpha=alpha)
 
-            if level == 0.7:
-                distances = cdist(class_1_contour.collections[0].get_paths()[0].vertices, 
-                                  class_0_contour.collections[0].get_paths()[0].vertices, metric='euclidean')
-                margin_widths.append(np.min(distances))
+        # Add logistic regression equation and margin width as text
+        equation = f"{beta0:.2f} + {beta1:.2f} * x1 + {beta2:.2f} * x2 = 0\nx2 = {slope:.2f} * x1 + {intercept:.2f}"
+        plt.text(
+            0.05, 0.95, equation, transform=plt.gca().transAxes,
+            fontsize=10, bbox=dict(facecolor='white', alpha=0.8), verticalalignment='top'
+        )
+        plt.text(
+            0.05, 0.85, f"Margin Width: {margin_width:.2f}", transform=plt.gca().transAxes,
+            fontsize=10, bbox=dict(facecolor='white', alpha=0.8), verticalalignment='top'
+        )
 
-        plt.title(f"Shift Distance = {distance}", fontsize=24)
+        # Format the plot
+        plt.title(f"Shift Distance = {distance:.2f}", fontsize=16)
         plt.xlabel("x1")
         plt.ylabel("x2")
-        plt.legend(loc='lower right', fontsize=12)
-
+        pltmin = min(x_min, y_min)
+        pltmax = min(x_max, y_max)
+        plt.axis("tight")
+        # Save the sample data for debugging or further analysis
         sample_data[distance] = (X, y, model, beta0, beta1, beta2)
 
     plt.tight_layout()
